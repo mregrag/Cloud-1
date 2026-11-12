@@ -10,11 +10,14 @@
     dest: /opt/cloud-1/docker-compose.yml
     mode: "0644"
 
-- name: Copy environment file
+- name: Create environment file
   ansible.builtin.copy:
-    src: "{{ playbook_dir }}/../srcs/.env"
+    content: "{{ app_env }}"
     dest: /opt/cloud-1/.env
+    owner: root
+    group: root
     mode: "0600"
+  no_log: true
 
 - name: Create NGINX configuration directory
   ansible.builtin.file:
@@ -32,6 +35,8 @@
   ansible.builtin.file:
     path: /opt/cloud-1/requirements/nginx/ssl
     state: directory
+    owner: root
+    group: root
     mode: "0700"
 
 - name: Copy SSL certificate
@@ -44,6 +49,8 @@
   ansible.builtin.copy:
     src: "{{ playbook_dir }}/../srcs/requirements/nginx/ssl/nginx.key"
     dest: /opt/cloud-1/requirements/nginx/ssl/nginx.key
+    owner: root
+    group: root
     mode: "0600"
 
 - name: Start application containers
