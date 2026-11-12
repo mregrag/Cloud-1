@@ -2,13 +2,8 @@ name: Deploy EC2
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
   workflow_dispatch:
-
-permissions:
-  id-token: write
-  contents: read
 
 jobs:
   deploy:
@@ -16,43 +11,39 @@ jobs:
 
     env:
       AWS_REGION: ${{ secrets.AWS_REGION }}
-      TF_STATE_BUCKET: ${{ secrets.TF_STATE_BUCKET }}
 
     steps:
-      # 1. Get project files
       - name: Checkout
         uses: actions/checkout@v4
 
-      # 2. Connect GitHub Actions to AWS
       - name: Configure AWS
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      # 3. Install Terraform and Ansible
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.10.5
+          terraform_wrapper: false
 
       - name: Install Ansible
         run: pip install ansible-core
 
-      # 4. Prepare SSH key
-      - name: Setup SSH
+      - name: Setup SSH key
         env:
           SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
         run: |
           mkdir -p ~/.ssh
-          echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
 
-      # 5. Get GitHub runner public IP
       - name: Get runner IP
         id: ip
-        run: |
-          echo "cidr=$(curl -s https://api.ipify.org)/32" >> "$GITHUB_OUTPUT"
+        run: echo "cidr=$(curl -s https://checkip.amazonaws.com)/32" >> "$GITHUB_OUTPUT"
 
-      # 6. Create EC2 with Terraform
       - name: Terraform Apply
         working-directory: terraform
         env:
@@ -61,37 +52,32 @@ jobs:
           TF_VAR_allowed_ssh_cidr: ${{ steps.ip.outputs.cidr }}
         run: |
           terraform init -input=false \
-            -backend-config="bucket=$TF_STATE_BUCKET" \
+            -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
             -backend-config="key=ec2/terraform.tfstate" \
             -backend-config="region=$AWS_REGION" \
-            -backend-config="encrypt=true" \
             -backend-config="use_lockfile=true"
-
           terraform apply -input=false -auto-approve
 
-      # 7. Get EC2 public IP
       - name: Get EC2 IP
         id: ec2
         working-directory: terraform
-        run: |
-          echo "ip=$(terraform output -raw instance_public_ip)" >> "$GITHUB_OUTPUT"
+        run: echo "ip=$(terraform output -raw instance_public_ip)" >> "$GITHUB_OUTPUT"
 
-      # 8. Wait for SSH
-      - name: Wait for EC2
+      - name: Wait for SSH
+        env:
+          EC2_IP: ${{ steps.ec2.outputs.ip }}
         run: |
           for i in {1..30}; do
-            if ssh -i ~/.ssh/id_ed25519 \
+            ssh -i ~/.ssh/id_ed25519 \
               -o StrictHostKeyChecking=no \
+              -o UserKnownHostsFile=/dev/null \
               -o ConnectTimeout=5 \
-              ubuntu@${{ steps.ec2.outputs.ip }} "echo Connected"; then
-              exit 0
-            fi
+              ubuntu@$EC2_IP "echo Connected" && exit 0
             sleep 10
           done
-          echo "EC2 SSH connection failed"
+          echo "SSH failed"
           exit 1
 
-      # 9. Configure EC2 with Ansible
       - name: Run Ansible
         env:
           EC2_IP: ${{ steps.ec2.outputs.ip }}
@@ -99,5 +85,4 @@ jobs:
         run: |
           echo "[webservers]" > inventory.ini
           echo "$EC2_IP ansible_user=ubuntu ansible_ssh_private_key_file=$HOME/.ssh/id_ed25519" >> inventory.ini
-
           ansible-playbook -i inventory.ini ansible/playbook.yml
