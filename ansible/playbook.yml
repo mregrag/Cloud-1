@@ -2,7 +2,9 @@
   hosts: webservers
   become: true
 
+  vars:
+    app_env: "{{ lookup('env', 'APP_ENV') }}"
+
   roles:
     - docker
     - deploy
-
