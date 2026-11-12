@@ -1,4 +1,3 @@
-
 name: Deploy EC2
 
 on:
@@ -43,7 +42,7 @@ jobs:
         run: ansible-galaxy collection install community.docker
 
       - name: Verify Ansible collection
-        run: ansible-galaxy collection list
+        run: ansible-galaxy collection list community.docker
 
       - name: Setup SSH key
         env:
@@ -55,7 +54,8 @@ jobs:
 
       - name: Get runner IP
         id: ip
-        run: echo "cidr=$(curl -s https://checkip.amazonaws.com)/32" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "cidr=$(curl -fsS https://checkip.amazonaws.com)/32" >> "$GITHUB_OUTPUT"
 
       - name: Terraform Apply
         working-directory: terraform
@@ -84,18 +84,40 @@ jobs:
         run: |
           mkdir -p ansible
           echo "[webservers]" > ansible/inventory.ini
-          echo "$EC2_IP ansible_user=root ansible_ssh_private_key_file=$HOME/.ssh/id_ed25519" >> ansible/inventory.ini
+          echo "$EC2_IP ansible_user=ubuntu ansible_ssh_private_key_file=$HOME/.ssh/id_ed25519" >> ansible/inventory.ini
 
-      - name: Deploy with Ansible
+          cat ansible/inventory.ini
+
+      - name: Wait for EC2 SSH
         env:
-          APP_ENV: ${{ secrets.APP_ENV }}
-          ANSIBLE_HOST_KEY_CHECKING: "False"
+          EC2_IP: ${{ steps.ec2.outputs.ip }}
+        run: |
+          for i in {1..30}; do
+            if ssh -i ~/.ssh/id_ed25519 \
+              -o StrictHostKeyChecking=no \
+              -o ConnectTimeout=5 \
+              ubuntu@"$EC2_IP" "echo SSH ready"; then
+              exit 0
+            fi
+            echo "Waiting for EC2 SSH..."
+            sleep 10
+          done
+
+          echo "EC2 SSH connection failed"
+          exit 1
+
+      - name: Check Ansible syntax
         run: |
           ansible-playbook \
             -i ansible/inventory.ini \
             ansible/playbook.yml \
             --syntax-check
 
+      - name: Deploy with Ansible
+        env:
+          APP_ENV: ${{ secrets.APP_ENV }}
+          ANSIBLE_HOST_KEY_CHECKING: "False"
+        run: |
           ansible-playbook \
             -i ansible/inventory.ini \
             ansible/playbook.yml
