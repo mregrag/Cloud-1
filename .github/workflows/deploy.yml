@@ -66,8 +66,8 @@ jobs:
       - name: Run Ansible
         env:
           EC2_IP: ${{ steps.ec2.outputs.ip }}
-          ANSIBLE_HOST_KEY_CHECKING: "false"
         run: |
+          pip install ansible-core
           echo "[webservers]" > inventory.ini
-          echo "$EC2_IP ansible_user=ubuntu ansible_ssh_private_key_file=$HOME/.ssh/id_ed25519" >> inventory.ini
-          ansible-playbook -i inventory.ini ansible/playbook.yml
+          echo "$EC2_IP" >> inventory.ini
+          ansible-playbook ansible/playbook.yml

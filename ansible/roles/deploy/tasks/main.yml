@@ -1,0 +1,52 @@
+- name: Create application directory
+  ansible.builtin.file:
+    path: /opt/cloud-1
+    state: directory
+    mode: "0755"
+
+- name: Copy Docker Compose file
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../srcs/docker-compose.yml"
+    dest: /opt/cloud-1/docker-compose.yml
+    mode: "0644"
+
+- name: Copy environment file
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../srcs/.env"
+    dest: /opt/cloud-1/.env
+    mode: "0600"
+
+- name: Create NGINX configuration directory
+  ansible.builtin.file:
+    path: /opt/cloud-1/requirements/nginx
+    state: directory
+    mode: "0755"
+
+- name: Copy NGINX configuration
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../srcs/requirements/nginx/default.conf"
+    dest: /opt/cloud-1/requirements/nginx/default.conf
+    mode: "0644"
+
+    - name: Create NGINX SSL directory
+  ansible.builtin.file:
+    path: /opt/cloud-1/requirements/nginx/ssl
+    state: directory
+    mode: "0700"
+
+- name: Copy SSL certificate
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../srcs/requirements/nginx/ssl/nginx.crt"
+    dest: /opt/cloud-1/requirements/nginx/ssl/nginx.crt
+    mode: "0644"
+
+- name: Copy SSL private key
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../srcs/requirements/nginx/ssl/nginx.key"
+    dest: /opt/cloud-1/requirements/nginx/ssl/nginx.key
+    mode: "0600"
+
+- name: Start application containers
+  community.docker.docker_compose_v2:
+    project_src: /opt/cloud-1
+    state: present

@@ -1,11 +1,7 @@
-- name: Hello World
+- name: Prepare Cloud-1 servers
   hosts: webservers
+  become: true
 
-  tasks:
-    - name: Echo hello world
-      command: echo "Hello World"
-      register: result
+  roles:
+    - docker
 
-    - name: Show output
-      debug:
-        msg: "{{ result.stdout }}"
