@@ -82,14 +82,20 @@ the state bucket created in step 1.
 
 ## 4. Configure GitHub variables and secrets
 
-Variables:
+`AWS_REGION` and `TF_STATE_BUCKET` can be repository variables or secrets; the
+workflow uses the variable first and falls back to the secret.
 
 ```bash
+# Option A: repository variables (recommended)
 gh variable set AWS_REGION --body "eu-north-1"
 gh variable set TF_STATE_BUCKET --body "<state-bucket-name>"
+
+# Option B: repository secrets
+gh secret set AWS_REGION --body "eu-north-1"
+gh secret set TF_STATE_BUCKET --body "<state-bucket-name>"
 ```
 
-Secrets:
+Required secrets:
 
 ```bash
 gh secret set AWS_ROLE_ARN --body "arn:aws:iam::<ACCOUNT_ID>:role/<ROLE_NAME>"

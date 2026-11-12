@@ -16,8 +16,6 @@ concurrency:
 
 env:
   TF_IN_AUTOMATION: "true"
-  AWS_REGION: ${{ vars.AWS_REGION }}
-  TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
 
 jobs:
   deploy:
@@ -25,15 +23,24 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION || secrets.AWS_REGION }}
+      TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET || secrets.TF_STATE_BUCKET }}
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Validate required configuration
+        run: |
+          test -n "$AWS_REGION" || { echo "::error::Set AWS_REGION as a repository variable or secret"; exit 1; }
+          test -n "$TF_STATE_BUCKET" || { echo "::error::Set TF_STATE_BUCKET as a repository variable or secret"; exit 1; }
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ vars.AWS_REGION }}
+          aws-region: ${{ env.AWS_REGION }}
 
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v3
@@ -85,7 +92,7 @@ jobs:
       - name: Terraform plan
         working-directory: terraform
         env:
-          TF_VAR_aws_region: ${{ vars.AWS_REGION }}
+          TF_VAR_aws_region: ${{ env.AWS_REGION }}
           TF_VAR_ssh_public_key: ${{ secrets.EC2_SSH_PUBLIC_KEY }}
           TF_VAR_allowed_ssh_cidr: ${{ steps.runner_ip.outputs.cidr }}
         run: terraform plan -input=false -out=tfplan
@@ -93,7 +100,7 @@ jobs:
       - name: Terraform apply
         working-directory: terraform
         env:
-          TF_VAR_aws_region: ${{ vars.AWS_REGION }}
+          TF_VAR_aws_region: ${{ env.AWS_REGION }}
           TF_VAR_ssh_public_key: ${{ secrets.EC2_SSH_PUBLIC_KEY }}
           TF_VAR_allowed_ssh_cidr: ${{ steps.runner_ip.outputs.cidr }}
         run: terraform apply -input=false -auto-approve tfplan
