@@ -3,6 +3,16 @@
 Terraform provisions an Ubuntu EC2 instance, and Ansible configures it with nginx.
 GitHub Actions runs the full flow on every push to `main` using AWS OIDC (no long-lived AWS keys).
 
+> **Order matters:** create the S3 state bucket in `bootstrap/` first. Terraform uses
+> it as its remote backend, so the EC2 workflow cannot start until the bucket exists.
+
+## Quick start
+
+1. Create the state bucket: `cd bootstrap && terraform init && terraform apply`.
+2. Copy the bucket name into GitHub as `TF_STATE_BUCKET` (variable or secret).
+3. Add `AWS_REGION` and the secrets described in section 4.
+4. Push to `main`; the workflow creates the EC2 instance and runs Ansible.
+
 ## Repository layout
 
 | Path | Purpose |

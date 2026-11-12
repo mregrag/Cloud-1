@@ -19,26 +19,34 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # Get project files
+      # 1. Get project files
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Connect to AWS
+      # 2. Check GitHub identity
+      - name: Check GitHub repository identity
+        run: |
+          echo "Repository: $GITHUB_REPOSITORY"
+          echo "Owner ID: ${{ github.repository_owner_id }}"
+          echo "Repository ID: ${{ github.repository_id }}"
+          echo "Branch: $GITHUB_REF"
+
+      # 3. Connect to AWS
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      # Install Terraform
+      # 4. Install Terraform
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
 
-      # Install Ansible
+      # 5. Install Ansible
       - name: Install Ansible
         run: pip install ansible-core
 
-      # Configure SSH
+      # 6. Configure SSH key
       - name: Setup SSH key
         env:
           SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
@@ -47,13 +55,13 @@ jobs:
           echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
 
-      # Get GitHub runner IP
+      # 7. Get GitHub runner IP
       - name: Get runner IP
         id: ip
         run: |
-          echo "cidr=$(curl -s https://api.ipify.org)/32" >> "$GITHUB_OUTPUT"
+          echo "cidr=$(curl -4 -s https://api.ipify.org)/32" >> "$GITHUB_OUTPUT"
 
-      # Create EC2 using Terraform
+      # 8. Create EC2 with Terraform
       - name: Run Terraform
         working-directory: terraform
         env:
@@ -70,20 +78,20 @@ jobs:
 
           terraform apply -input=false -auto-approve
 
-      # Get EC2 public IP
+      # 9. Get EC2 public IP
       - name: Get EC2 IP
         id: ec2
         working-directory: terraform
         run: |
           echo "ip=$(terraform output -raw instance_public_ip)" >> "$GITHUB_OUTPUT"
 
-      # Create Ansible inventory
+      # 10. Create Ansible inventory
       - name: Create inventory
         run: |
           echo "[webservers]" > inventory.ini
           echo "ec2 ansible_host=${{ steps.ec2.outputs.ip }} ansible_user=ubuntu ansible_ssh_private_key_file=$HOME/.ssh/id_ed25519" >> inventory.ini
 
-      # Run Ansible playbook
+      # 11. Run Ansible
       - name: Run Ansible
         env:
           ANSIBLE_HOST_KEY_CHECKING: "false"

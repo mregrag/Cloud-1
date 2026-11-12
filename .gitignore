@@ -10,7 +10,7 @@ crash.*.log
 *.tfvars.json
 
 # Ansible
-ansible/inventory.ini
+inventory.ini
 *.retry
 __pycache__/
 
