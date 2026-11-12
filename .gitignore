@@ -1,0 +1,9 @@
+.vault_pass
+.env
+*.pem
+*.key
+*.csr
+secrets/
+__pycache__/
+*.retry
+Inception/secrets/
