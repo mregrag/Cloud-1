@@ -32,7 +32,7 @@ Keep the bucket name; it is needed by both CI/CD and local runs.
 The bootstrap state is local and is intentionally gitignored.
 
 The default region is `eu-north-1`. To use another region, pass the same value here
-and in the `AWS_REGION` GitHub variable:
+and in the `AWS_REGION` GitHub variable or secret:
 
 ```bash
 terraform apply -var="aws_region=us-east-1"

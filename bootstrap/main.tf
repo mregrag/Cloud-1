@@ -3,7 +3,7 @@ resource "random_id" "suffix" {
 }
 
 resource "aws_s3_bucket" "terraform_state" {
-  bucket = "my-terraform-state-${random_id.suffix.hex}"
+  bucket = "terraform-state-cloud-1-1337"
 
   tags = {
     Name        = "Terraform State Bucket"
