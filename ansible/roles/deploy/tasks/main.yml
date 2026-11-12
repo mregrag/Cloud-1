@@ -28,7 +28,7 @@
     dest: /opt/cloud-1/requirements/nginx/default.conf
     mode: "0644"
 
-    - name: Create NGINX SSL directory
+- name: Create NGINX SSL directory
   ansible.builtin.file:
     path: /opt/cloud-1/requirements/nginx/ssl
     state: directory
