@@ -1,3 +1,4 @@
+
 name: Deploy EC2
 
 on:
@@ -52,6 +53,30 @@ jobs:
           printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
 
+      - name: Prepare SSL private key
+        env:
+          SSL_PRIVATE_KEY: ${{ secrets.NGINX_SSL_PRIVATE_KEY }}
+        run: |
+          test -n "$SSL_PRIVATE_KEY" || {
+            echo "NGINX_SSL_PRIVATE_KEY secret is missing"
+            exit 1
+          }
+
+          mkdir -p srcs/requirements/nginx/ssl
+          printf '%s\n' "$SSL_PRIVATE_KEY" > srcs/requirements/nginx/ssl/nginx.key
+          chmod 600 srcs/requirements/nginx/ssl/nginx.key
+
+      - name: Check SSL certificate
+        run: |
+          test -f srcs/requirements/nginx/ssl/nginx.crt || {
+            echo "SSL certificate nginx.crt is missing"
+            exit 1
+          }
+
+          openssl x509 \
+            -in srcs/requirements/nginx/ssl/nginx.crt \
+            -noout
+
       - name: Get runner IP
         id: ip
         run: |
@@ -99,6 +124,7 @@ jobs:
               ubuntu@"$EC2_IP" "echo SSH ready"; then
               exit 0
             fi
+
             echo "Waiting for EC2 SSH..."
             sleep 10
           done
