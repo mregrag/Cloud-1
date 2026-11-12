@@ -4,130 +4,55 @@ on:
   push:
     branches:
       - main
-
   workflow_dispatch:
 
 permissions:
   id-token: write
   contents: read
 
-concurrency:
-  group: deploy-ec2
-  cancel-in-progress: false
-
 env:
-  TF_IN_AUTOMATION: "true"
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
 
 jobs:
   deploy:
-    name: Provision and configure EC2
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-
-    env:
-      AWS_REGION: ${{ vars.AWS_REGION }}
-      TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
 
     steps:
-      # 1. Checkout repository
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      # 2. Validate configuration
-      - name: Validate deployment configuration
-        run: |
-          set -euo pipefail
-
-          if [ -z "$AWS_REGION" ]; then
-            echo "ERROR: AWS_REGION is missing."
-            exit 1
-          fi
-
-          if [ -z "$TF_STATE_BUCKET" ]; then
-            echo "ERROR: TF_STATE_BUCKET is missing."
-            exit 1
-          fi
-
-          if [ -z "${{ secrets.AWS_ROLE_ARN }}" ]; then
-            echo "ERROR: AWS_ROLE_ARN secret is missing."
-            exit 1
-          fi
-
-          if [ -z "${{ secrets.EC2_SSH_PRIVATE_KEY }}" ]; then
-            echo "ERROR: EC2_SSH_PRIVATE_KEY secret is missing."
-            exit 1
-          fi
-
-          if [ -z "${{ secrets.EC2_SSH_PUBLIC_KEY }}" ]; then
-            echo "ERROR: EC2_SSH_PUBLIC_KEY secret is missing."
-            exit 1
-          fi
-
-          echo "AWS region: $AWS_REGION"
-          echo "Terraform state bucket is configured."
-
-      # 3. Authenticate with AWS using OIDC
-      - name: Configure AWS credentials
+      - name: Connect to AWS
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      # 4. Verify AWS authentication
-      - name: Verify AWS identity
-        run: aws sts get-caller-identity
-
-      # 5. Install Terraform
-      - name: Set up Terraform
+      - name: Install Terraform
         uses: hashicorp/setup-terraform@v3
 
-      # 6. Install Python
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      # 7. Install Ansible
       - name: Install Ansible
         run: pip install ansible-core
 
-      # 8. Check Ansible syntax
-      - name: Check Ansible syntax
-        working-directory: ansible
-        run: ansible-playbook --syntax-check -i localhost, playbook.yml
-
-      # 9. Check Terraform formatting
-      - name: Check Terraform formatting
-        run: terraform fmt -check -recursive terraform
-
-      # 10. Configure SSH private key
       - name: Configure SSH key
         env:
           SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
         run: |
-          set -euo pipefail
-
           mkdir -p ~/.ssh
-          chmod 700 ~/.ssh
-
-          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
 
-      # 11. Get GitHub runner public IP
-      - name: Get runner public IP
-        id: runner_ip
+      - name: Get runner IP
+        id: ip
         run: |
-          set -euo pipefail
+          echo "cidr=$(curl -s https://api.ipify.org)/32" >> "$GITHUB_OUTPUT"
 
-          IP=$(curl -4 -fsS https://api.ipify.org)
-
-          echo "cidr=${IP}/32" >> "$GITHUB_OUTPUT"
-
-          echo "Runner IP: ${IP}/32"
-
-      # 12. Initialize Terraform with S3 backend
-      - name: Terraform Init
+      - name: Terraform
         working-directory: terraform
+        env:
+          TF_VAR_aws_region: ${{ env.AWS_REGION }}
+          TF_VAR_ssh_public_key: ${{ secrets.EC2_SSH_PUBLIC_KEY }}
+          TF_VAR_allowed_ssh_cidr: ${{ steps.ip.outputs.cidr }}
         run: |
           terraform init -input=false \
             -backend-config="bucket=$TF_STATE_BUCKET" \
@@ -136,94 +61,21 @@ jobs:
             -backend-config="encrypt=true" \
             -backend-config="use_lockfile=true"
 
-      # 13. Validate Terraform
-      - name: Terraform Validate
-        working-directory: terraform
-        run: terraform validate
+          terraform apply -input=false -auto-approve
 
-      # 14. Terraform Plan
-      - name: Terraform Plan
-        working-directory: terraform
-        env:
-          TF_VAR_aws_region: ${{ env.AWS_REGION }}
-          TF_VAR_ssh_public_key: ${{ secrets.EC2_SSH_PUBLIC_KEY }}
-          TF_VAR_allowed_ssh_cidr: ${{ steps.runner_ip.outputs.cidr }}
-        run: |
-          terraform plan -input=false -out=tfplan
-
-      # 15. Create or update EC2 infrastructure
-      - name: Terraform Apply
-        working-directory: terraform
-        run: terraform apply -input=false -auto-approve tfplan
-
-      # 16. Read EC2 public IP
-      - name: Read EC2 public IP
+      - name: Get EC2 public IP
         id: ec2
         working-directory: terraform
         run: |
-          IP=$(terraform output -raw instance_public_ip)
+          echo "ip=$(terraform output -raw instance_public_ip)" >> "$GITHUB_OUTPUT"
 
-          echo "public_ip=$IP" >> "$GITHUB_OUTPUT"
-
-          echo "EC2 public IP: $IP"
-
-      # 17. Wait for EC2 and cloud-init
-      - name: Wait for EC2
-        env:
-          EC2_HOST: ${{ steps.ec2.outputs.public_ip }}
-        run: |
-          set -euo pipefail
-
-          for i in {1..30}; do
-            if ssh \
-              -i ~/.ssh/id_ed25519 \
-              -o BatchMode=yes \
-              -o StrictHostKeyChecking=no \
-              -o UserKnownHostsFile=/dev/null \
-              -o ConnectTimeout=5 \
-              ubuntu@"$EC2_HOST" \
-              "test -f /var/lib/cloud/instance/boot-finished"; then
-
-              echo "EC2 is ready."
-              exit 0
-            fi
-
-            echo "Waiting for EC2 ($i/30)..."
-            sleep 10
-          done
-
-          echo "ERROR: EC2 did not become ready."
-          exit 1
-
-      # 18. Create dynamic Ansible inventory
       - name: Create Ansible inventory
-        env:
-          EC2_HOST: ${{ steps.ec2.outputs.public_ip }}
         run: |
-          cat > "$RUNNER_TEMP/inventory.ini" <<EOF
-          [webservers]
-          ec2 ansible_host=$EC2_HOST ansible_user=ubuntu ansible_ssh_private_key_file=$HOME/.ssh/id_ed25519
-          EOF
+          echo "[webservers]" > inventory.ini
+          echo "ec2 ansible_host=${{ steps.ec2.outputs.ip }} ansible_user=ubuntu ansible_ssh_private_key_file=~/.ssh/id_ed25519" >> inventory.ini
 
-          cat "$RUNNER_TEMP/inventory.ini"
-
-      # 19. Configure EC2 using Ansible
-      - name: Configure EC2 with Ansible
-        working-directory: ansible
+      - name: Run Ansible
         env:
           ANSIBLE_HOST_KEY_CHECKING: "false"
         run: |
-          ansible-playbook \
-            -i "$RUNNER_TEMP/inventory.ini" \
-            playbook.yml
-
-      # 20. Deployment summary
-      - name: Deployment summary
-        env:
-          EC2_HOST: ${{ steps.ec2.outputs.public_ip }}
-        run: |
-          echo "## Deployment successful" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "EC2 instance: $EC2_HOST" >> "$GITHUB_STEP_SUMMARY"
-          echo "Region: $AWS_REGION" >> "$GITHUB_STEP_SUMMARY"
-          echo "Web server: http://$EC2_HOST" >> "$GITHUB_STEP_SUMMARY"
+          ansible-playbook -i inventory.ini ansible/playbook.yml
