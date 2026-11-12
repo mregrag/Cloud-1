@@ -47,6 +47,14 @@ resource "aws_security_group" "app_sg" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
+  ingress {
+    description = "EC2 Instance Connect (browser SSH)"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["13.48.4.200/30"]
+  }
+
   egress {
     description = "All outbound traffic"
     from_port   = 0

@@ -63,21 +63,6 @@ jobs:
         working-directory: terraform
         run: echo "ip=$(terraform output -raw instance_public_ip)" >> "$GITHUB_OUTPUT"
 
-      - name: Wait for SSH
-        env:
-          EC2_IP: ${{ steps.ec2.outputs.ip }}
-        run: |
-          for i in {1..30}; do
-            ssh -i ~/.ssh/id_ed25519 \
-              -o StrictHostKeyChecking=no \
-              -o UserKnownHostsFile=/dev/null \
-              -o ConnectTimeout=5 \
-              ubuntu@$EC2_IP "echo Connected" && exit 0
-            sleep 10
-          done
-          echo "SSH failed"
-          exit 1
-
       - name: Run Ansible
         env:
           EC2_IP: ${{ steps.ec2.outputs.ip }}
