@@ -1,9 +1,23 @@
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan
+crash.log
+crash.*.log
+*.tfvars
+*.tfvars.json
+
+# Ansible
+ansible/inventory.ini
+*.retry
+__pycache__/
+
+# Secrets
 .vault_pass
 .env
 *.pem
 *.key
 *.csr
 secrets/
-__pycache__/
-*.retry
-Inception/secrets/

@@ -1,0 +1,4 @@
+[webservers]
+# Copy this file to inventory.ini and replace YOUR_EC2_PUBLIC_IP.
+# CI/CD generates its own inventory, so this file is only for local runs.
+ec2 ansible_host=YOUR_EC2_PUBLIC_IP ansible_user=ubuntu

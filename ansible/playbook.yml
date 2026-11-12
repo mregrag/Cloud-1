@@ -1,21 +1,55 @@
-- name: Configure AWS EC2 instance
+---
+- name: Configure the EC2 web server
   hosts: webservers
-  become: yes
+  become: true
 
   tasks:
-    - name: Update apt cache
-      apt:
-        update_cache: yes
-        cache_valid_time: 3600
-
-    - name: Install Nginx
-      apt:
+    - name: Install nginx
+      ansible.builtin.apt:
         name: nginx
         state: present
+        update_cache: true
+        cache_valid_time: 3600
+        lock_timeout: 300
 
-    - name: Start and enable Nginx
-      service:
+    - name: Ensure nginx is enabled and running
+      ansible.builtin.service:
         name: nginx
         state: started
-        enabled: yes
+        enabled: true
 
+    - name: Deploy the landing page
+      ansible.builtin.copy:
+        dest: /var/www/html/index.html
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          <!DOCTYPE html>
+          <html lang="en">
+            <head>
+              <meta charset="utf-8">
+              <title>Cloud-1</title>
+            </head>
+            <body>
+              <h1>Cloud-1 is running</h1>
+              <p>Provisioned by Terraform and configured by Ansible.</p>
+            </body>
+          </html>
+      notify: Restart nginx
+
+    - name: Apply pending nginx restarts
+      ansible.builtin.meta: flush_handlers
+
+    - name: Verify nginx responds
+      ansible.builtin.uri:
+        url: http://127.0.0.1/
+        status_code: 200
+      retries: 5
+      delay: 2
+
+  handlers:
+    - name: Restart nginx
+      ansible.builtin.service:
+        name: nginx
+        state: restarted

@@ -1,41 +1,143 @@
-name: Deploy with Ansible
+name: Deploy EC2
 
 on:
   push:
     branches:
       - main
-
   workflow_dispatch:
 
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: deploy-ec2
+  cancel-in-progress: false
+
+env:
+  TF_IN_AUTOMATION: "true"
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+
 jobs:
-  configure-server:
+  deploy:
+    name: Provision and configure EC2
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.x'
+          python-version: "3.12"
 
       - name: Install Ansible
-        run: |
-          python -m pip install --upgrade pip
-          pip install ansible
+        run: pip install ansible-core
+
+      - name: Check Ansible syntax
+        working-directory: ansible
+        run: ansible-playbook --syntax-check -i inventory.ini.example playbook.yml
+
+      - name: Check Terraform formatting
+        run: terraform fmt -check -recursive terraform bootstrap
 
       - name: Configure SSH key
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.EC2_SSH_PRIVATE_KEY }}" > ~/.ssh/ec2_key
-          chmod 600 ~/.ssh/ec2_key
+          chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
 
-      - name: Run Ansible playbook
+      - name: Get runner public IP
+        id: runner_ip
         run: |
-          ansible-playbook \
-            -i "${{ secrets.EC2_HOST }}," \
-            -u ubuntu \
-            --private-key ~/.ssh/ec2_key \
-            ansible/playbook.yml
+          IP=$(curl -4 -fsS https://api.ipify.org)
+          echo "cidr=${IP}/32" >> "$GITHUB_OUTPUT"
 
+      - name: Terraform init
+        working-directory: terraform
+        run: |
+          terraform init -input=false \
+            -backend-config="bucket=$TF_STATE_BUCKET" \
+            -backend-config="key=ec2/terraform.tfstate" \
+            -backend-config="region=$AWS_REGION" \
+            -backend-config="encrypt=true" \
+            -backend-config="use_lockfile=true"
+
+      - name: Terraform validate
+        working-directory: terraform
+        run: terraform validate
+
+      - name: Terraform plan
+        working-directory: terraform
+        env:
+          TF_VAR_aws_region: ${{ vars.AWS_REGION }}
+          TF_VAR_ssh_public_key: ${{ secrets.EC2_SSH_PUBLIC_KEY }}
+          TF_VAR_allowed_ssh_cidr: ${{ steps.runner_ip.outputs.cidr }}
+        run: terraform plan -input=false -out=tfplan
+
+      - name: Terraform apply
+        working-directory: terraform
+        env:
+          TF_VAR_aws_region: ${{ vars.AWS_REGION }}
+          TF_VAR_ssh_public_key: ${{ secrets.EC2_SSH_PUBLIC_KEY }}
+          TF_VAR_allowed_ssh_cidr: ${{ steps.runner_ip.outputs.cidr }}
+        run: terraform apply -input=false -auto-approve tfplan
+
+      - name: Read EC2 public IP
+        id: ec2
+        working-directory: terraform
+        run: echo "public_ip=$(terraform output -raw instance_public_ip)" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for EC2 and cloud-init
+        env:
+          EC2_HOST: ${{ steps.ec2.outputs.public_ip }}
+        run: |
+          set -euo pipefail
+          for i in {1..30}; do
+            if ssh \
+              -i ~/.ssh/id_ed25519 \
+              -o BatchMode=yes \
+              -o StrictHostKeyChecking=no \
+              -o UserKnownHostsFile=/dev/null \
+              -o ConnectTimeout=5 \
+              ubuntu@"$EC2_HOST" "test -f /var/lib/cloud/instance/boot-finished"; then
+              echo "EC2 is ready"
+              exit 0
+            fi
+
+            echo "Waiting for EC2 ($i/30)..."
+            sleep 10
+          done
+
+          echo "EC2 did not become ready in time"
+          exit 1
+
+      - name: Create Ansible inventory
+        env:
+          EC2_HOST: ${{ steps.ec2.outputs.public_ip }}
+        run: |
+          cat > "$RUNNER_TEMP/inventory.ini" <<EOF
+          [webservers]
+          ec2 ansible_host=$EC2_HOST ansible_user=ubuntu ansible_ssh_private_key_file=$HOME/.ssh/id_ed25519
+          EOF
+
+      - name: Configure EC2 with Ansible
+        working-directory: ansible
+        env:
+          ANSIBLE_HOST_KEY_CHECKING: "false"
+        run: ansible-playbook -i "$RUNNER_TEMP/inventory.ini" playbook.yml

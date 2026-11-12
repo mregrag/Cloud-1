@@ -22,3 +22,18 @@ variable "instance_name" {
   default     = "cloud-1"
 }
 
+variable "ssh_public_key" {
+  description = "SSH public key registered with the EC2 instance"
+  type        = string
+  sensitive   = true
+}
+
+variable "allowed_ssh_cidr" {
+  description = "IPv4 CIDR allowed to connect over SSH, for example the GitHub Actions runner IP with /32"
+  type        = string
+
+  validation {
+    condition     = can(cidrnetmask(var.allowed_ssh_cidr))
+    error_message = "allowed_ssh_cidr must be a valid IPv4 CIDR block, for example 203.0.113.10/32."
+  }
+}
