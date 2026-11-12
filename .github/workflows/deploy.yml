@@ -1,8 +1,10 @@
+
 name: Deploy EC2
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
@@ -13,10 +15,10 @@ jobs:
       AWS_REGION: ${{ secrets.AWS_REGION }}
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Configure AWS
+      - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -29,8 +31,19 @@ jobs:
           terraform_version: 1.10.5
           terraform_wrapper: false
 
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
       - name: Install Ansible
         run: pip install ansible-core
+
+      - name: Install Ansible Docker collection
+        run: ansible-galaxy collection install community.docker
+
+      - name: Verify Ansible collection
+        run: ansible-galaxy collection list
 
       - name: Setup SSH key
         env:
@@ -56,18 +69,33 @@ jobs:
             -backend-config="key=ec2/terraform.tfstate" \
             -backend-config="region=$AWS_REGION" \
             -backend-config="use_lockfile=true"
+
           terraform apply -input=false -auto-approve
 
-      - name: Get EC2 IP
+      - name: Get EC2 public IP
         id: ec2
         working-directory: terraform
-        run: echo "ip=$(terraform output -raw instance_public_ip)" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "ip=$(terraform output -raw instance_public_ip)" >> "$GITHUB_OUTPUT"
 
-      - name: Run Ansible
+      - name: Create Ansible inventory
         env:
           EC2_IP: ${{ steps.ec2.outputs.ip }}
         run: |
-          pip install ansible-core
-          echo "[webservers]" > inventory.ini
-          echo "$EC2_IP" >> inventory.ini
-          ansible-playbook ansible/playbook.yml
+          mkdir -p ansible
+          echo "[webservers]" > ansible/inventory.ini
+          echo "$EC2_IP ansible_user=root ansible_ssh_private_key_file=$HOME/.ssh/id_ed25519" >> ansible/inventory.ini
+
+      - name: Deploy with Ansible
+        env:
+          APP_ENV: ${{ secrets.APP_ENV }}
+          ANSIBLE_HOST_KEY_CHECKING: "False"
+        run: |
+          ansible-playbook \
+            -i ansible/inventory.ini \
+            ansible/playbook.yml \
+            --syntax-check
+
+          ansible-playbook \
+            -i ansible/inventory.ini \
+            ansible/playbook.yml
